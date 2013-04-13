@@ -22,7 +22,7 @@ package main
 	
 import (
 	"github.com/droundy/goopt"
-//	"fmt"
+	"fmt"
 //	"io"
 	"strings"
 	"time"
@@ -46,11 +46,11 @@ type semaphore chan empty
 var semStreams semaphore
 
 var defaultTests = []Test {
-    {"ICMPv4 localhost", "ip4:icmp", "", "127.0.0.1", false},
-    {"ICMPv6 localhost", "ip6:icmp", "", "::1", true},
-	{"UDP localhost:80", "udp4", "", "127.0.0.1:80", false},
-	{"TCP localhost:http[80]", "tcp4", "", "127.0.0.1:80", false},
-	{"TCP bad.example.com:http[80]", "tcp4", "", "bad.example.com:http", false},
+    {"ICMPv4 localhost", "ip4:icmp", "", "127.0.0.1", false, "", "", false, false},
+    {"ICMPv6 localhost", "ip6:icmp", "", "::1", true, "", "", false, false},
+	{"UDP localhost:80", "udp4", "localhost:1025", "127.0.0.1:80", false, "", "", false, false},
+	{"TCP localhost:http[80]", "tcp4", "", "127.0.0.1:80", false, "", "", false, false},
+	{"TCP bad.example.com:http[80]", "tcp4", "", "bad.example.com:http", false, "", "", false, false},
 }
 
 type Test struct {
@@ -59,7 +59,13 @@ type Test struct {
     laddr string
     raddr string
     ipv6  bool // test with underlying AF_INET6 socket
+	laddr_used string // the local address that ended up being used for this test
+	raddr_used string // the remote address we connected to for this test
+	run    bool
+	passed bool
 }
+
+
 
 func init() {
 	goopt.Description = func() string {
@@ -77,6 +83,7 @@ func init() {
 	
 	semStreams = make(semaphore, *params.MaxStreams)
 	runtime.GOMAXPROCS(runtime.NumCPU())
+
 }
 
 
@@ -95,16 +102,22 @@ func main() {
 
 // read file
 
+
+	p, inputChan := NewICMPPublisher()
+
 // loop over each connection, in a new thread
-    for _, tt := range defaultTests {
+    for idx, _ := range defaultTests {
         /*if tt.ipv6 && !net.supportsIPv6 {
 			log.Println("IPv6 not supported")
             continue
         }*/
 		semStreams.acquire(1) // or block until one slot is free
-		log.Println("Going to run a goroutine")
-		go runTest(tt)
+		fmt.Println("Going to run a goroutine")
+		go runTest(&defaultTests[idx],p)
     }
+
+	var msg ICMPMessage
+	inputChan<-msg
 
 /// try basic check
 /// if that works, try helper app
@@ -112,9 +125,9 @@ func main() {
 // wait for all to complete
 // end
 
-	log.Println("going to wait for all goroutines to complete")
+	fmt.Println("going to wait for all goroutines to complete")
 	semStreams.acquire(*params.MaxStreams) // don't exit until all goroutines are complete
-	log.Println("all complete")
+	fmt.Println("all complete")
 
 }
 
@@ -122,10 +135,13 @@ func getConfig() {
 
 }
 
-func runTest(test Test) (error) {
+func runTest(test *Test, p *ICMPPublisher) (error) {
 	defer semStreams.release(1) // always release, regardless of the reason we exit
+	
+	icmpCh := p.Subscribe()
+	defer p.Unsubscribe(icmpCh)
 
-	log.Println("Running test", test.desc)
+	fmt.Println("Running test", fmtTest(*test))
 
 	i := strings.LastIndex(test.net, ":")
 	var afnet string
@@ -134,47 +150,60 @@ func runTest(test Test) (error) {
     } else {
 		afnet = test.net[:i]
 	}
-	log.Println("Got type of" , afnet)
+	fmt.Println("Got type of" , afnet)
     switch afnet {
 	case "ip", "ip4","ip6":
 		// Do ICMP tests since Dial doesn't support them
-		log.Println("Test:", test.desc, "IP not yet implemented")
+		test.run = true
+		log.Println(fmtTest(*test), "IP not yet implemented")
 		return nil
 	default:
-		log.Println("Doing UDP/TCP test")
+		fmt.Println("Doing UDP/TCP test")
 		var d net.Dialer
 		var err error
 		switch afnet {
 		case "tcp", "tcp4", "tcp6":
 			d.LocalAddr, err = net.ResolveTCPAddr(afnet, test.laddr)
 			if err != nil {
-				log.Println("Test:", test.desc,"TCP Resolve error:", err)
+				test.run = true
+				log.Println(fmtTest(*test), "TCP Resolve error:", err)
     			return err
 			}
 		default:
 			d.LocalAddr, err = net.ResolveUDPAddr("udp", test.laddr)
 			if err != nil {
-				log.Println("Test:", test.desc, "UDP Resolve error:", err)
+				test.run = true
+				log.Println(fmtTest(*test), "had UDP Resolve error:", err)
     			return err
 			}
 		}		
 		d.Timeout, err = time.ParseDuration("20s")
 		conn, error := d.Dial(test.net, test.raddr)
 		if error != nil {
-			log.Println("Test:", test.desc,"Dial error:", error)
+			test.run = true
+			log.Println(fmtTest(*test), "had Dial error:", error)
 			return error
 		}
+		test.laddr_used = conn.LocalAddr().String()
+		test.raddr_used = conn.RemoteAddr().String()
 		_, err = conn.Write([]byte("conchk test packet"))
 		if err != nil {
-			log.Println("Test:", test.desc,"Write error:", err)
+			test.run = true
+			log.Println(fmtTest(*test), "Write error:", err)
     		return err
 		}
 		conn.Close()
-		log.Println("Test:", test.desc, "successfully completed")
+		test.run = true
+		test.passed = true
+		log.Println(fmtTest(*test))
+
 		return nil
 	}
 	return nil
+
+
 }
+
 
 /*
 func icmpTest(net string, laddr string, raddr string) {
@@ -246,6 +275,44 @@ func (s semaphore) release(n int) {
 	}
 }
 
+
+func fmtTest(test Test) (string) {
+	var local string
+	if test.laddr == "" {
+			local = "#undefined#"
+	} else {
+		local = test.laddr
+	}
+	if test.laddr_used != "" {
+		local += "("+test.laddr_used+")"
+	}
+	remote := test.raddr
+	if test.raddr_used != "" {
+		remote += "("+test.raddr_used+")"
+	}
+	status := "PENDING"
+	if test.run {
+		status = "FAILED"
+		if test.passed {
+			status = "PASSED"
+		}
+	}
+	out := fmt.Sprintf("%s: '%s' %s %s --> %s", status, test.desc, test.net, local, remote)
+	if test.ipv6  {
+		out += " [on AF_INET6 socket]"
+	}
+		return out
+}
+
+// Huge assumption that IPv6 addresses will always be in square brackets. Lets run with this for now
+// TODO(bf) Verify this, or validate it on config read at least
+func isV6(ip string)  (bool) {
+	if strings.LastIndex(ip, "[") > 0 {
+		return true 
+	}
+	return false
+}
+	
 /*
 func parseConnType(network string) (afnet string, proto int, err error) {
     i := last(network, ':')
@@ -293,3 +360,5 @@ func resolveAddr(afnet, addr string) (a Addr, err error) {
 }
 
 */
+
+
