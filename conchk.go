@@ -24,6 +24,7 @@ import (
 	"github.com/droundy/goopt"
 //	"fmt"
 //	"io"
+	"strings"
 	"time"
 	"net"
 	"log"
@@ -45,15 +46,19 @@ type semaphore chan empty
 var semStreams semaphore
 
 var defaultTests = []Test {
-        {"ip4:icmp", "", "127.0.0.1", false},
-        {"ip6:icmp", "", "::1", true},
+    {"ICMPv4 localhost", "ip4:icmp", "", "127.0.0.1", false},
+    {"ICMPv6 localhost", "ip6:icmp", "", "::1", true},
+	{"UDP localhost:80", "udp4", "", "127.0.0.1:80", false},
+	{"TCP localhost:http[80]", "tcp4", "", "127.0.0.1:80", false},
+	{"TCP bad.example.com:http[80]", "tcp4", "", "bad.example.com:http", false},
 }
 
 type Test struct {
-        net   string
-        laddr string
-        raddr string
-        ipv6  bool // test with underlying AF_INET6 socket
+	desc  string
+    net   string
+    laddr string
+    raddr string
+    ipv6  bool // test with underlying AF_INET6 socket
 }
 
 func init() {
@@ -64,7 +69,7 @@ func init() {
 	goopt.Version = "0.1"
 	goopt.Summary = "conchk is an ip connectivity test tool"
 
-	Hostname, error := os.Hostname()
+	Hostname, _ := os.Hostname()
 
 	params.ConfigFile = goopt.String([]string{"-C", "--config"}, "~/conchk.cfg", "Config file to load")
 	params.MyHost = goopt.String([]string{"-H", "--host"}, Hostname, "Hostname to use for config lookup")
@@ -117,94 +122,61 @@ func getConfig() {
 
 }
 
-func runTest(test Test) {
-	afnet, proto, err := parseConnType(test.net)
+func runTest(test Test) (error) {
+	defer semStreams.release(1) // always release, regardless of the reason we exit
+
+	log.Println("Running test", test.desc)
+
+	i := strings.LastIndex(test.net, ":")
+	var afnet string
+    if i < 0 { // no colon
+		afnet = test.net
+    } else {
+		afnet = test.net[:i]
+	}
+	log.Println("Got type of" , afnet)
     switch afnet {
-    case "tcp", "tcp4", "tcp6":
-		//tcpConn(test.net, test.laddr, test.raddr)
-	case "udp", "udp4", "udp6":	
-		udpTest(test.net, test.laddr, test.raddr)
-	case "ip", "ipv4", "ipv6":
-		ipTest(test.net, test.laddr, test.raddr)
+	case "ip", "ip4","ip6":
+		// Do ICMP tests since Dial doesn't support them
+		log.Println("Test:", test.desc, "IP not yet implemented")
+		return nil
+	default:
+		log.Println("Doing UDP/TCP test")
+		var d net.Dialer
+		var err error
+		switch afnet {
+		case "tcp", "tcp4", "tcp6":
+			d.LocalAddr, err = net.ResolveTCPAddr(afnet, test.laddr)
+			if err != nil {
+				log.Println("Test:", test.desc,"TCP Resolve error:", err)
+    			return err
+			}
+		default:
+			d.LocalAddr, err = net.ResolveUDPAddr("udp", test.laddr)
+			if err != nil {
+				log.Println("Test:", test.desc, "UDP Resolve error:", err)
+    			return err
+			}
+		}		
+		d.Timeout, err = time.ParseDuration("20s")
+		conn, error := d.Dial(test.net, test.raddr)
+		if error != nil {
+			log.Println("Test:", test.desc,"Dial error:", error)
+			return error
+		}
+		_, err = conn.Write([]byte("conchk test packet"))
+		if err != nil {
+			log.Println("Test:", test.desc,"Write error:", err)
+    		return err
+		}
+		conn.Close()
+		log.Println("Test:", test.desc, "successfully completed")
+		return nil
 	}
-	return
+	return nil
 }
 
-// pure IP test. Can puport to carry any protocol, in reality carries nothing.
-func ipTest(network string, laddr string, raddr string) (failed bool, err error) {
-	cl, err := net.ListenPacket(network, laddr)
-    if err != nil {
-    	log.Println("ListenPacket(%q, %q) failed: %v", network, laddr, err)
-    	return true, err
-    }
-    cl.SetDeadline(time.Now().Add(100 * time.Millisecond))
-   	defer cl.Close()
-
-	_, raddri, err := parseConnType(network, raddr)
-    if err != nil {
-    	return true, err
-    }
-	_, laddri, err := resolveNetAddr("listen", network, laddr)
-    if err != nil {
-    	return true, err
-    }
-	cr, err = DialIP(network, laddri, raddri)
-	if err != nil {
-    	return true, err
-    }
-	_, err = cr.Write([]byte("conchk test packet"))
-	if err != nil {
-    	return true, err
-    }
-	cr.Close()
-
-    reply := make([]byte, 256)
-    for {
-        _, _, err := cl.ReadFrom(reply)
-        if err != nil {
-            t.Errorf("ReadFrom failed: %v", err)
-            return
-        }
-        switch cl.(*IPConn).fd.family {
-        case syscall.AF_INET:
-            if reply[0] != ICMP4_ECHO_REPLY {
-                continue
-            }
-        case syscall.AF_INET6:
-            if reply[0] != ICMP6_ECHO_REPLY {
-                continue
-            }
-        }
-        xid, xseqnum := parseICMPEchoReply(echo)
-        rid, rseqnum := parseICMPEchoReply(reply)
-        if rid != xid || rseqnum != xseqnum {
-            t.Errorf("ID = %v, Seqnum = %v, want ID = %v, Seqnum = %v", rid, rseqnum, xid, xseqnum)
-            return
-        }
-        break
-    }
-
-	return false, err
-}
-
-func tcpConnect(net string, laddr string, raddr string, maxWait int) {
-	conn, err := net.Dial("tcp", "google.com:80")
-	if err != nil {
-		// handle error
-	}
-}
-
-func udpTest(net string, laddr string, raddr string) {
-	err := ListenPacket(net, laddr)
-    if err != nil {
-    	t.Errorf("ListenPacket(%q, %q) failed: %v", net, laddr, err)
-    	return
-    }
-    c.SetDeadline(time.Now().Add(100 * time.Millisecond))
-   	defer c.Close()
-
-}
-
+/*
 func icmpTest(net string, laddr string, raddr string) {
 	err := net.ListenPacket(net, laddr)
     if err != nil {
@@ -257,7 +229,7 @@ func icmpTest(net string, laddr string, raddr string) {
     }
 
 }
-
+*/
 
 // acquire n resources
 func (s semaphore) acquire(n int) {
@@ -274,6 +246,7 @@ func (s semaphore) release(n int) {
 	}
 }
 
+/*
 func parseConnType(network string) (afnet string, proto int, err error) {
     i := last(network, ':')
     if i < 0 { // no colon
@@ -319,4 +292,4 @@ func resolveAddr(afnet, addr string) (a Addr, err error) {
 	}
 }
 
-
+*/
