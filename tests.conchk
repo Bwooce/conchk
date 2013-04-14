@@ -1,0 +1,7 @@
+Bruce-Fitzsimons-MacBook.local,"this is a description",tcp4,"",fitzsimons.org:80
+Bruce-Fitzsimons-MacBook.local,"this is a description",tcp4,localhost:0,fitzsimons.org:80
+Bruce-Fitzsimons-MacBook.local,"this is a description",tcp4,10.151.33.225:0,fitzsimons.org:80
+Bruce-Fitzsimons-MacBook.local,"this is a description",udp4,"",fitzsimons.org:53
+Bruce-Fitzsimons-MacBook.local,"this is a description",udp4,10.151.33.225:0,fitzsimons.org:53
+host,"this is another description",udp4,127.0.0.1:99,127.0.0.1:80
+
