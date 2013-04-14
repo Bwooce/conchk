@@ -134,6 +134,10 @@ func main() {
 	log.Printf("== %d of %d tests passed ==", numPassed, numTests)
 	log.Println("----------------", goopt.Description(), "----------------")
 
+	if numPassed != numTests {
+		os.Exit(1) // indicate an error
+	}
+	os.Exit(0)
 }
 
 func getTestsFromFile() {

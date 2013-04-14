@@ -1,7 +1,7 @@
 Bruce-Fitzsimons-MacBook.local,Any local port to external website,tcp4,"",fitzsimons.org:80
-Bruce-Fitzsimons-MacBook.local,"this is a description",tcp4,localhost:0,fitzsimons.org:80
-Bruce-Fitzsimons-MacBook.local,"this is a description",tcp4,10.151.33.225:0,fitzsimons.org:80
-Bruce-Fitzsimons-MacBook.local,"this is a description",udp4,"",fitzsimons.org:53
+Bruce-Fitzsimons-MacBook.local,"localhost to external, designed to fail",tcp4,localhost:0,fitzsimons.org:80
+Bruce-Fitzsimons-MacBook.local,"defined local public interface to external http",tcp4,10.151.33.225:0,fitzsimons.org:http
+Bruce-Fitzsimons-MacBook.local,"any local public to external dns",udp4,"",fitzsimons.org:domain
 Bruce-Fitzsimons-MacBook.local,"this is a description",udp4,10.151.33.225:0,fitzsimons.org:53
 Bruce-Fitzsimons-MacBook.local,"UDPv6 localhost",udp6,"","[::1]:123"
 Bruce-Fitzsimons-MacBook.local,"UDPv6 to external website",udp6,"","mirageletters.com:53"
