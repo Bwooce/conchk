@@ -154,7 +154,7 @@ func getTestsFromFile() {
 		}
 		//fmt.Println("looking for tests for", *params.MyHost)
 		for _, test := range tests {
-			if test[0] == *params.MyHost {
+			if strings.TrimSpace(test[0]) == *params.MyHost {
 				appendTest(test)
 			}
 		}
@@ -172,10 +172,10 @@ func appendTest(test []string) {
 		TestsToRun = newSlice
 	}
 	TestsToRun = TestsToRun[0 : l+1]
-	TestsToRun[l].desc = test[1]
-	TestsToRun[l].net = test[2]
+	TestsToRun[l].desc = strings.TrimSpace(test[1])
+	TestsToRun[l].net = strings.TrimSpace(test[2])
 
-	laddr := test[3]
+	laddr := strings.TrimSpace(test[3])
 	if len(laddr) > 0 {
 		i := strings.LastIndex(test[3], ":")
 		if i < 0 { // no colon
@@ -183,7 +183,7 @@ func appendTest(test []string) {
 		}
 	}
 	TestsToRun[l].laddr = laddr
-	TestsToRun[l].raddr = test[4]
+	TestsToRun[l].raddr = strings.TrimSpace(test[4])
 }
 
 func runTest(test *Test, p *ICMPPublisher) {
