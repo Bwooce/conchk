@@ -63,11 +63,11 @@ var TestsToRun []Test
 
 func init() {
 	goopt.Description = func() string {
-		return "conchk (c) 2013 Bruce Fitzsimons"
+		return "conchk v" + goopt.Version + " - (c)2013 Bruce Fitzsimons"
 	}
 	goopt.Author = "Bruce Fitzsimons <bruce@fitzsimons.org>"
 	goopt.Version = "0.1"
-	goopt.Summary = "conchk is an ip connectivity test tool"
+	goopt.Summary = "conchk is an IP connectivity test tool. See github.com/Bwooce/conchk for more information."
 
 	Hostname, _ := os.Hostname()
 
@@ -81,8 +81,9 @@ func init() {
 }
 
 func main() {
+	log.Println("-------------", goopt.Description(), "------------")
 	if os.Getuid() != 0 {
-		log.Println("test disabled; must be root")
+		log.Println("conchk must run as root to function (ICMP listens, low port access etc)")
 		return
 	}
 
@@ -132,7 +133,7 @@ func main() {
 		}
 	}
 	log.Printf("== %d of %d tests passed ==", numPassed, numTests)
-	log.Println("----------------", goopt.Description(), "----------------")
+	log.Println("-------------", goopt.Description(), "-------------")
 
 	if numPassed != numTests {
 		os.Exit(1) // indicate an error
@@ -375,7 +376,7 @@ func fmtTest(test Test) string {
 			status = "PASSED"
 		}
 	}
-	out := fmt.Sprintf("%s: '%s' %s %s --> %s", status, test.desc, test.net, local, remote)
+	out := fmt.Sprintf("%s: '%s' %s %s --> %s", status, pad(test.desc,60), test.net, local, remote)
 	if test.ipv6 {
 		out += " [on AF_INET6 socket]"
 	}
@@ -383,6 +384,13 @@ func fmtTest(test Test) string {
 		out += " ERROR INFO: " + test.error
 	}
 	return out
+}
+
+func pad(s string, length int) string {
+	if(len(s) < length) {
+		return s+strings.Repeat(" ", length - len(s))
+	}
+	return s
 }
 
 // Huge assumption that IPv6 addresses will always be in square brackets. Lets run with this for now
