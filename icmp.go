@@ -26,10 +26,10 @@ import (
 )
 
 type ICMPMessage struct {
-	msgtype int8
-	code int8
-	checksum int16
-	originalDest  string
+	msgtype        int8
+	code           int8
+	checksum       int16
+	originalDest   string
 	originalSource string
 	originalProto  string
 }

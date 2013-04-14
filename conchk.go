@@ -24,17 +24,17 @@ import (
 	"fmt"
 	"github.com/droundy/goopt"
 	//	"io"
+	"encoding/csv"
 	"log"
 	"net"
 	"os"
 	"runtime"
 	"strings"
 	"time"
-	"encoding/csv"
 )
 
 type Parameters struct {
-	TestsFile *string
+	TestsFile  *string
 	MyHost     *string
 	MaxStreams *int
 }
@@ -45,7 +45,6 @@ type empty struct{}
 type semaphore chan empty
 
 var semStreams semaphore
-
 
 type Test struct {
 	desc       string
@@ -106,7 +105,7 @@ func main() {
 		            continue
 		        }*/
 		semStreams.acquire(1) // or block until one slot is free
-		fmt.Println("Going to run a goroutine")
+		//fmt.Println("Going to run a goroutine")
 		go runTest(&TestsToRun[idx], p)
 	}
 
@@ -119,16 +118,28 @@ func main() {
 	// wait for all to complete
 	// end
 
-	fmt.Println("going to wait for all goroutines to complete")
+	//fmt.Println("going to wait for all goroutines to complete")
 	semStreams.acquire(*params.MaxStreams) // don't exit until all goroutines are complete
-	fmt.Println("all complete")
+	//fmt.Println("all complete")
+
+	log.Println("--------------------- TESTING RUN COMPLETED ---------------------")
+	numTests := len(TestsToRun)
+	var numPassed int
+	for _, test := range TestsToRun {
+		log.Println(fmtTest(test))
+		if test.passed {
+			numPassed++
+		}
+	}
+	log.Printf("== %d of %d tests passed ==", numPassed, numTests)
+	log.Println("----------------", goopt.Description(), "----------------")
 
 }
 
 func getTestsFromFile() {
-	log.Println("Reading tests from file")
-	if params.TestsFile !=nil {
-		file, err := os.Open(*params.TestsFile) 
+	log.Println("Reading tests for", *params.MyHost, "from file", *params.TestsFile)
+	if params.TestsFile != nil {
+		file, err := os.Open(*params.TestsFile)
 		if err != nil {
 			log.Fatal("Cannot open", *params.TestsFile, "due to error", err)
 		}
@@ -137,46 +148,44 @@ func getTestsFromFile() {
 		if err != nil {
 			log.Fatal("Cannot read tests from", *params.TestsFile, "due to error", err)
 		}
-		fmt.Println("looking for tests for", *params.MyHost)
+		//fmt.Println("looking for tests for", *params.MyHost)
 		for _, test := range tests {
 			if test[0] == *params.MyHost {
 				appendTest(test)
-				fmt.Println(test)
 			}
 		}
 		return
 	}
-	log.Fatal("No file of tests specified")
 }
 
-func appendTest(test []string)  {
-    l := len(TestsToRun)
-    if l >= cap(TestsToRun) {  // reallocate
-        // Allocate double what's needed, for future growth.
-        newSlice := make([]Test, (l+1)*2)
-        // The copy function is predeclared and works for any slice type.
-        copy(newSlice, TestsToRun)
-        TestsToRun = newSlice
-    }
-    TestsToRun = TestsToRun[0:l+1]
+func appendTest(test []string) {
+	l := len(TestsToRun)
+	if l >= cap(TestsToRun) { // reallocate
+		// Allocate double what's needed, for future growth.
+		newSlice := make([]Test, (l+1)*2)
+		// The copy function is predeclared and works for any slice type.
+		copy(newSlice, TestsToRun)
+		TestsToRun = newSlice
+	}
+	TestsToRun = TestsToRun[0 : l+1]
 	TestsToRun[l].desc = test[1]
 	TestsToRun[l].net = test[2]
 
 	laddr := test[3]
-	if(len(laddr) > 0) {
+	if len(laddr) > 0 {
 		i := strings.LastIndex(test[3], ":")
 		if i < 0 { // no colon
 			laddr += ":0"
-		} 
+		}
 	}
-	TestsToRun[l].laddr = laddr 
+	TestsToRun[l].laddr = laddr
 	TestsToRun[l].raddr = test[4]
 }
 
 func runTest(test *Test, p *ICMPPublisher) {
 	defer semStreams.release(1) // always release, regardless of the reason we exit
 
-	fmt.Println("Running test", fmtTest(*test))
+	//fmt.Println("Running test", fmtTest(*test))
 
 	i := strings.LastIndex(test.net, ":")
 	var afnet string
@@ -185,7 +194,7 @@ func runTest(test *Test, p *ICMPPublisher) {
 	} else {
 		afnet = test.net[:i]
 	}
-	fmt.Println("Got type of", afnet)
+	//fmt.Println("Got type of", afnet)
 	switch afnet {
 	//case "ip", "ip4", "ip6":
 	case "udp", "udp4", "udp6":
@@ -195,32 +204,32 @@ func runTest(test *Test, p *ICMPPublisher) {
 	default:
 		// Do ICMP tests since Dial doesn't support them
 		test.run = true
-		log.Println(fmtTest(*test), "as Protocol", afnet ,"not yet implemented")
+		test.error = "Protocol" + afnet + " not yet implemented"
 	}
 	return
 }
 
 func runUDPTest(afnet string, test *Test, p *ICMPPublisher) {
-	fmt.Println("Doing UDP test")
-	
+	//fmt.Println("Doing UDP test")
+
 	icmpCh := p.Subscribe()
 	defer p.Unsubscribe(icmpCh)
-	
+
 	var d net.Dialer
 	var err error
 
 	d.LocalAddr, err = net.ResolveUDPAddr(afnet, test.laddr)
 	if err != nil {
 		test.run = true
-		log.Println(fmtTest(*test), "had UDP Resolve error:", err)
+		test.error = "UDP Resolve error: " + err.Error()
 		return
 	}
 
 	d.Timeout, err = time.ParseDuration("20s")
-	conn, error := d.Dial(test.net, test.raddr)
-	if error != nil {
+	conn, err := d.Dial(test.net, test.raddr)
+	if err != nil {
 		test.run = true
-		log.Println(fmtTest(*test), "had Dial error:", error)
+		test.error = "UDP Dial error: " + err.Error()
 		return
 	}
 	test.laddr_used = conn.LocalAddr().String()
@@ -228,33 +237,33 @@ func runUDPTest(afnet string, test *Test, p *ICMPPublisher) {
 	_, err = conn.Write([]byte("conchk test packet")) // almost impossible to fail for UDP, the ICMP response is the important thing
 	if err != nil {
 		test.run = true
-		log.Println(fmtTest(*test), "had Write error:", err)
+		test.error = "UDP Write error: " + err.Error()
 		return
 	}
 	conn.Close()
 	test.run = true
 	test.passed = true
-	log.Println(fmtTest(*test))
+	//log.Println(fmtTest(*test))
 }
 
 func runTCPTest(afnet string, test *Test, p *ICMPPublisher) {
-	fmt.Println("Doing TCP test")
+	//fmt.Println("Doing TCP test")
 	var d net.Dialer
 	var err error
 
 	// no need to register for ICMP as the TCP RST will be enough for us
-	
+
 	d.LocalAddr, err = net.ResolveTCPAddr(afnet, test.laddr)
 	if err != nil {
 		test.run = true
-		log.Println(fmtTest(*test), "had TCP Resolve error:", err)
+		test.error = "TCP Resolve error: " + err.Error()
 		return
 	}
 	d.Timeout, err = time.ParseDuration("20s")
-	conn, error := d.Dial(test.net, test.raddr)
-	if error != nil {
+	conn, err := d.Dial(test.net, test.raddr)
+	if err != nil {
 		test.run = true
-		log.Println(fmtTest(*test), "had Dial error:", error)
+		test.error = "Connect error: " + err.Error()
 		return
 	}
 	test.laddr_used = conn.LocalAddr().String()
@@ -262,13 +271,13 @@ func runTCPTest(afnet string, test *Test, p *ICMPPublisher) {
 	_, err = conn.Write([]byte("conchk test packet"))
 	if err != nil {
 		test.run = true
-		log.Println(fmtTest(*test), "had Write error:", err)
+		test.error = "TCP Write error: " + err.Error()
 		return
 	}
 	conn.Close()
 	test.run = true
 	test.passed = true
-	log.Println(fmtTest(*test))
+	//log.Println(fmtTest(*test))
 }
 
 /*
@@ -365,6 +374,9 @@ func fmtTest(test Test) string {
 	out := fmt.Sprintf("%s: '%s' %s %s --> %s", status, test.desc, test.net, local, remote)
 	if test.ipv6 {
 		out += " [on AF_INET6 socket]"
+	}
+	if len(test.error) > 0 {
+		out += " ERROR INFO: " + test.error
 	}
 	return out
 }

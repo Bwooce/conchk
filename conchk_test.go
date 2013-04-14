@@ -21,7 +21,7 @@
 package main
 
 import (
-       "testing"
+	"testing"
 )
 
 var defaultTests = []Test{
@@ -33,18 +33,18 @@ var defaultTests = []Test{
 }
 
 func TestIsV6(t *testing.T) {
-	var v4 = []string { "1.1.1.1", "10.10.10.10", "255.255.255.255", "1.0.255.254", "0.0.0.0", "1.1.1.1:1", "23.12.167.1:65535" }
-	var v6 = []string { "[::1]", "[FE80:0000:0000:0000:0202:B3FF: FE1E:8329]", "[fdf8:f53b:82e4::53]", "[::ffff:192.0.2.47]", "[2001:db8:8:4::2]" }
-	
+	var v4 = []string{"1.1.1.1", "10.10.10.10", "255.255.255.255", "1.0.255.254", "0.0.0.0", "1.1.1.1:1", "23.12.167.1:65535"}
+	var v6 = []string{"[::1]", "[FE80:0000:0000:0000:0202:B3FF: FE1E:8329]", "[fdf8:f53b:82e4::53]", "[::ffff:192.0.2.47]", "[2001:db8:8:4::2]"}
+
 	for _, ip := range v4 {
 		result := isV6(ip)
-		if(result) {
+		if result {
 			t.Fatal("Address is v4 but thinks is v6:", ip)
 		}
 	}
 	for _, ip := range v6 {
 		result := isV6(ip)
-		if(!result) {
+		if !result {
 			t.Fatal("Address is v6 but thinks is v4:", ip)
 		}
 	}
