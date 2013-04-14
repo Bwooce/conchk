@@ -22,6 +22,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"github.com/droundy/goopt"
 	//	"io"
 	"encoding/csv"
@@ -61,6 +62,23 @@ type Test struct {
 
 var TestsToRun []Test
 
+var gotRoot bool
+
+const debug debugging = true // or flip to false
+
+type debugging bool
+
+func (d debugging) Println(args ...interface{}) {
+    if d {
+        log.Println(append([]interface{}{"DEBUG:"}, args...)...)
+    }
+}
+func (d debugging) Printf(format string, args ...interface{}) {
+    if d {
+        log.Printf("DEBUG:" + format, args...)
+    }
+}
+
 func init() {
 	goopt.Description = func() string {
 		return "conchk v" + goopt.Version + " - (c)2013 Bruce Fitzsimons"
@@ -82,9 +100,10 @@ func init() {
 
 func main() {
 	log.Println("-------------", goopt.Description(), "------------")
+	gotRoot = true
 	if os.Getuid() != 0 {
-		log.Println("conchk must run as root to function (ICMP listens, low port access etc)")
-		return
+		gotRoot = false
+		log.Println("WARNING: conchk must run as root to fully function (ICMP listens, low port access etc)")
 	}
 
 	// get command line options
@@ -98,6 +117,10 @@ func main() {
 	getTestsFromFile()
 
 	p, inputChan := NewICMPPublisher()
+	if(gotRoot) {
+		go icmpListen(false, inputChan)
+		go icmpListen(true, inputChan)
+	}
 
 	// loop over each connection, in a new thread
 	for idx, _ := range TestsToRun {
@@ -119,9 +142,9 @@ func main() {
 	// wait for all to complete
 	// end
 
-	//fmt.Println("going to wait for all goroutines to complete")
+	debug.Println("going to wait for all goroutines to complete")
 	semStreams.acquire(*params.MaxStreams) // don't exit until all goroutines are complete
-	//fmt.Println("all complete")
+	debug.Println("all complete")
 
 	log.Println("--------------------- TESTING RUN COMPLETED ---------------------")
 	numTests := len(TestsToRun)
@@ -159,6 +182,23 @@ func getTestsFromFile() {
 				appendTest(test)
 			}
 		}
+		
+		// See if we can continue or not. Try hard.
+		if !gotRoot {
+			for _, test := range TestsToRun  {
+				if len(test.laddr) > 0 {
+					_, aport, err := net.SplitHostPort(test.laddr)
+					port, err2 := strconv.ParseUint(aport, 0, 32)
+					if err != nil || err2 != nil {
+						log.Fatal("Invalid local address on test:",fmtTest(test))
+					}
+					if port > 0 && port < 1024 {
+						log.Fatal("Cannot execute test w/o root access:", fmtTest(test))
+					}
+				}
+			}
+		}
+
 		return
 	}
 }
@@ -185,12 +225,13 @@ func appendTest(test []string) {
 	}
 	TestsToRun[l].laddr = laddr
 	TestsToRun[l].raddr = strings.TrimSpace(test[4])
+	debug.Println("size is", len(TestsToRun), "capacity is", cap(TestsToRun))
 }
 
 func runTest(test *Test, p *ICMPPublisher) {
 	defer semStreams.release(1) // always release, regardless of the reason we exit
 
-	//fmt.Println("Running test", fmtTest(*test))
+	debug.Println("Running test", fmtTest(*test))
 
 	i := strings.LastIndex(test.net, ":")
 	var afnet string
@@ -199,7 +240,7 @@ func runTest(test *Test, p *ICMPPublisher) {
 	} else {
 		afnet = test.net[:i]
 	}
-	//fmt.Println("Got type of", afnet)
+	debug.Println("Got type of", afnet)
 	switch afnet {
 	//case "ip", "ip4", "ip6":
 	case "udp", "udp4", "udp6":
@@ -215,10 +256,13 @@ func runTest(test *Test, p *ICMPPublisher) {
 }
 
 func runUDPTest(afnet string, test *Test, p *ICMPPublisher) {
-	//fmt.Println("Doing UDP test")
+	debug.Println("Doing UDP test")
 
-	icmpCh := p.Subscribe()
-	defer p.Unsubscribe(icmpCh)
+	var icmpCh chan ICMPMessage
+	if gotRoot {
+		icmpCh = p.Subscribe()
+		defer p.Unsubscribe(icmpCh)
+	}
 
 	var d net.Dialer
 	var err error
@@ -239,20 +283,25 @@ func runUDPTest(afnet string, test *Test, p *ICMPPublisher) {
 	}
 	test.laddr_used = conn.LocalAddr().String()
 	test.raddr_used = conn.RemoteAddr().String()
-	_, err = conn.Write([]byte("conchk test packet")) // almost impossible to fail for UDP, the ICMP response is the important thing
+	_, err = conn.Write([]byte("conchk test packet")) // hard to fail for UDP, the ICMP response is the important thing
 	if err != nil {
 		test.run = true
 		test.error = "UDP Write error: " + err.Error()
 		return
 	}
 	conn.Close()
-	test.run = true
-	test.passed = true
-	//log.Println(fmtTest(*test))
+
+	if gotRoot && waitForPossibleICMP(test, icmpCh) {
+		debug.Println("Failed due to ICMP response") 
+	} else {
+		test.run = true
+		test.passed = true
+	}
+	debug.Println("*****Completed: ", fmtTest(*test))
 }
 
 func runTCPTest(afnet string, test *Test, p *ICMPPublisher) {
-	//fmt.Println("Doing TCP test")
+	debug.Println("Doing TCP test")
 	var d net.Dialer
 	var err error
 
@@ -282,63 +331,8 @@ func runTCPTest(afnet string, test *Test, p *ICMPPublisher) {
 	conn.Close()
 	test.run = true
 	test.passed = true
-	//log.Println(fmtTest(*test))
+	debug.Println(fmtTest(*test))
 }
-
-/*
-func icmpTest(net string, laddr string, raddr string) {
-	err := net.ListenPacket(net, laddr)
-    if err != nil {
-    	log.Println("ListenPacket(%q, %q) failed: %v", net, laddr, err)
-    	return
-    }
-    c.SetDeadline(time.Now().Add(100 * time.Millisecond))
-   	defer c.Close()
-
- 	ra, err := ResolveIPAddr(net, raddr)
-    if err != nil {
-    	log.Println("ResolveIPAddr(%q, %q) failed: %v", net, raddr, err)
-    	return
-    }
-
-    waitForReady := make(chan bool)
-    go icmpEchoTransponder(t, net, raddr, waitForReady)
-    <-waitForReady
-
-    _, err = c.WriteTo(echo, ra)
-    if err != nil {
-    	log.Println("WriteTo failed: %v", err)
-    	return
-    }
-
-    reply := make([]byte, 256)
-    for {
-    	_, _, err := c.ReadFrom(reply)
-    	if err != nil {
-    		log.Println("ReadFrom failed: %v", err)
-    		return
-    	}
-    	switch c.(*IPConn).fd.family {
-    	case syscall.AF_INET:
-    		if reply[0] != ICMP4_ECHO_REPLY {
-    			continue
-			}
-    	case syscall.AF_INET6:
-    		if reply[0] != ICMP6_ECHO_REPLY {
-    			continue
-    		}
-    	}
-    	xid, xseqnum := parseICMPEchoReply(echo)
-    	rid, rseqnum := parseICMPEchoReply(reply)
-    	if rid != xid || rseqnum != xseqnum {
-    		log.Println("ID = %v, Seqnum = %v, want ID = %v, Seqnum = %v", rid, rseqnum, xid, xseqnum)
-    		return
-    	}
-   		break
-    }
-
-}
-*/
 
 // acquire n resources
 func (s semaphore) acquire(n int) {
@@ -358,7 +352,7 @@ func (s semaphore) release(n int) {
 func fmtTest(test Test) string {
 	var local string
 	if test.laddr == "" {
-		local = "#undefined#"
+		local = "#any#"
 	} else {
 		local = test.laddr
 	}
@@ -402,50 +396,3 @@ func isV6(ip string) bool {
 	return true
 }
 
-/*
-func parseConnType(network string) (afnet string, proto int, err error) {
-    i := last(network, ':')
-    if i < 0 { // no colon
-    	switch network {
-    	case "tcp", "tcp4", "tcp6":
-		case "udp", "udp4", "udp6":
-    	case "unix", "unixgram", "unixpacket":
-    	default:
-    		return "", 0, net.UnknownNetworkError(net)
-    	}
-    	return net, 0, nil
-    }
-    afnet = network[:i]
-    switch afnet {
-    case "ip", "ip4", "ip6":
-    	protostr := network[i+1:]
-    	proto, i, ok := dtoi(protostr, 0)
-    	if !ok || i != len(protostr) {
-			proto, err = lookupProtocol(protostr)
-			if err != nil {
-    			return "", 0, err
-    		}
-    	}
-    	return afnet, proto, nil
-    }
-    return "", 0, net.UnknownNetworkError(net)
-}
-
-func resolveAddr(afnet, addr string) (a Addr, err error) {
-	switch afnet {
-    case "tcp", "tcp4", "tcp6":
-    	if addr != "" {
-    		a, err = net.ResolveTCPAddr(afnet, addr)
-    	}
-    case "udp", "udp4", "udp6":
-    	if addr != "" {
-    		a, err = net.ResolveUDPAddr(afnet, addr)
-    	}
-    case "ip", "ip4", "ip6":
-    	if addr != "" {
-    		a, err = net.ResolveIPAddr(afnet, addr)
-    	}
-	}
-}
-
-*/
