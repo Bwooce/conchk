@@ -85,7 +85,7 @@ func init() {
 		return "conchk v" + goopt.Version + " - (c)2013 Bruce Fitzsimons"
 	}
 	goopt.Author = "Bruce Fitzsimons <bruce@fitzsimons.org>"
-	goopt.Version = "0.1"
+	goopt.Version = "0.2"
 	goopt.Summary = "conchk is an IP connectivity test tool. See github.com/Bwooce/conchk for more information."
 
 	Hostname, _ := os.Hostname()
