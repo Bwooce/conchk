@@ -1,10 +1,11 @@
-Bruce-Fitzsimons-MacBook.local,Any local port to external website,tcp4,"",fitzsimons.org:80
-Bruce-Fitzsimons-MacBook.local,"localhost to external, designed to fail",tcp4,localhost:0,fitzsimons.org:80
-Bruce-Fitzsimons-MacBook.local,"defined local public interface to external http",tcp4,10.151.33.225:0,fitzsimons.org:http
-Bruce-Fitzsimons-MacBook.local,"defined local public interface to external non-listening port",udp4,10.151.33.225:0,fitzsimons.org:81
-Bruce-Fitzsimons-MacBook.local,"any local public to external dns",udp4,"",fitzsimons.org:domain
-Bruce-Fitzsimons-MacBook.local,"defined local public interface, any port, to external dns via udp",udp4,10.151.33.225:0,fitzsimons.org:53
-Bruce-Fitzsimons-MacBook.local,"UDPv6 localhost",udp6,"","[::1]:123"
-Bruce-Fitzsimons-MacBook.local,"UDPv6 to external website",udp6,"","mirageletters.com:53"
-host,"this is another description",udp4,127.0.0.1:99,127.0.0.1:80
+Bruce-Fitzsimons-MacBook.local,1,Any local port to external website,tcp4,"",fitzsimons.org:80
+Bruce-Fitzsimons-MacBook.local,2,"localhost to external, designed to fail",tcp4,localhost:0,fitzsimons.org:80
+Bruce-Fitzsimons-MacBook.local,3,"defined local public interface to external http",tcp4,10.151.33.225:0,fitzsimons.org:80-83
+Bruce-Fitzsimons-MacBook.local,4,"defined local public interface to external non-listening port tcp",tcp4,10.151.33.225:0,fitzsimons.org:81
+Bruce-Fitzsimons-MacBook.local,5,"defined local public interface to external non-listening port udp",udp4,10.151.33.225:0,fitzsimons.org:81
+Bruce-Fitzsimons-MacBook.local,6,"any local public to external dns",udp4,"",fitzsimons.org:domain
+Bruce-Fitzsimons-MacBook.local,7,"defined local public interface, any port, to external dns via udp",udp4,10.151.33.225:0,fitzsimons.org:53-56
+Bruce-Fitzsimons-MacBook.local,8,"UDPv6 localhost",udp6,"","[::1]:123"
+Bruce-Fitzsimons-MacBook.local,9,"UDPv6 to external website",udp6,"","mirageletters.com:53"
+host,"this is another description",1,udp4,127.0.0.1:99,127.0.0.1:80
 

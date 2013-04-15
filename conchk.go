@@ -48,6 +48,7 @@ type semaphore chan empty
 var semStreams semaphore
 
 type Test struct {
+	ref        string
 	desc       string
 	net        string
 	laddr      string
@@ -204,28 +205,82 @@ func getTestsFromFile() {
 }
 
 func appendTest(test []string) {
+	address, startPort, endPort := findDestRange(strings.TrimSpace(test[5]))
+	portCount := (endPort-startPort)+1
+
 	l := len(TestsToRun)
-	if l >= cap(TestsToRun) { // reallocate
+	if l+portCount >= cap(TestsToRun) { // reallocate
 		// Allocate double what's needed, for future growth.
-		newSlice := make([]Test, (l+1)*2)
+		newSlice := make([]Test, (l+portCount)*2)
 		// The copy function is predeclared and works for any slice type.
 		copy(newSlice, TestsToRun)
 		TestsToRun = newSlice
 	}
-	TestsToRun = TestsToRun[0 : l+1]
-	TestsToRun[l].desc = strings.TrimSpace(test[1])
-	TestsToRun[l].net = strings.TrimSpace(test[2])
-
-	laddr := strings.TrimSpace(test[3])
-	if len(laddr) > 0 {
-		i := strings.LastIndex(test[3], ":")
-		if i < 0 { // no colon
-			laddr += ":0"
+	debug.Printf("iterating from %d to %d", startPort, endPort+1)
+	for cnt:=0; cnt < (endPort-startPort)+1; cnt++ {
+		debug.Printf("Adding test for dest port %d", startPort+cnt)
+		TestsToRun = TestsToRun[0 : l+1]
+		TestsToRun[l].ref = strings.TrimSpace(test[1])
+		if(startPort!=endPort && startPort !=0) {
+			TestsToRun[l].ref += fmt.Sprintf(".%d", cnt+1)
 		}
+		TestsToRun[l].desc = strings.TrimSpace(test[2])
+		TestsToRun[l].net = strings.TrimSpace(test[3])
+
+		laddr := strings.TrimSpace(test[4])
+		if len(laddr) > 0 {
+			i := strings.LastIndex(test[4], ":")
+			if i < 0 { // no colon
+				laddr += ":0"
+		}
+		}
+		TestsToRun[l].laddr = laddr
+		if startPort == 0 {
+			TestsToRun[l].raddr = address
+		} else {
+			TestsToRun[l].raddr = fmt.Sprintf("%s:%d",address,startPort+cnt)
+		}
+		l++
 	}
-	TestsToRun[l].laddr = laddr
-	TestsToRun[l].raddr = strings.TrimSpace(test[4])
 	debug.Println("size is", len(TestsToRun), "capacity is", cap(TestsToRun))
+}
+
+// Find the range of ports on the destination, if any. Returns 0,0 for error which should work fine (will error out on non-IP or ICMP protos)
+// port range is inclusive -- we need to test the start and the end
+func findDestRange(IPPort string) (IP string, startPort, endPort int) {
+	i := strings.LastIndex(IPPort, ":")
+	if i < 0 { // no colon
+		debug.Println("No colon")
+		return IPPort, 0,0
+	}
+	j := strings.LastIndex(IPPort[i+1:],"-")
+	if j < 0 { // no range
+		debug.Println("solo port:", IPPort[i+1:])
+		startPort, err := strconv.ParseInt(IPPort[i+1:], 0, 32)
+		if err != nil {
+			return IPPort, 0,0 // yeah, but this will have to do
+		}
+		return IPPort[:i],int(startPort), int(startPort)
+	}
+	debug.Printf("hyphen pos: %d, len %d", j, len(IPPort))
+	debug.Println("start:",IPPort[i+1:i+j+1])
+	port, err := strconv.ParseInt(IPPort[i+1:i+j+1], 0, 32)
+	startPort = int(port)
+	if err != nil {
+		return IPPort,0,0 // yeah, but this will have to do
+	}
+	debug.Println("end:", IPPort[i+j+1:])
+	port, err = strconv.ParseInt(IPPort[i+j+2:], 0, 32)
+	endPort = int(port)
+	if err != nil {
+		return IPPort,0,0 // yeah, but this will have to do
+	}
+	// Stop the madness before it begins
+	if endPort < startPort {
+		return IPPort,0,0
+	}
+	IP = IPPort[:i]
+	return 
 }
 
 func runTest(test *Test, p *ICMPPublisher) {
@@ -370,7 +425,7 @@ func fmtTest(test Test) string {
 			status = "PASSED"
 		}
 	}
-	out := fmt.Sprintf("%s: '%s' %s %s --> %s", status, pad(test.desc,60), test.net, local, remote)
+	out := fmt.Sprintf("%s: %s '%s' %s %s --> %s", status, pad(test.ref,5), pad(test.desc,60), test.net, local, remote)
 	if test.ipv6 {
 		out += " [on AF_INET6 socket]"
 	}
