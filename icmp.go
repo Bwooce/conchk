@@ -140,10 +140,13 @@ func (p *ICMPPublisher) Unsubscribe(ch chan ICMPMessage) {
 	p.unsub <- ch
 }
 
-func waitForPossibleICMP(test *Test, icmpCh chan ICMPMessage) bool {
+func waitForPossibleICMP(test *SubTest, icmpCh chan ICMPMessage) bool {
 	timeout := make(chan bool, 1)
 	go func() {
-		time.Sleep(5 * time.Second)
+		dur, err := time.ParseDuration(*params.Timeout)
+		if err == nil {
+			time.Sleep(dur)
+		}
 		timeout <- true
 	}()
 
@@ -155,7 +158,7 @@ func waitForPossibleICMP(test *Test, icmpCh chan ICMPMessage) bool {
 				test.run = true
 				test.passed = false
 				test.error = err.Error()
-				debug.Println(fmtTest(*test), "ICMP", err)
+				debug.Println(fmtSubTest(*test), "ICMP", err)
 				return true
 			}
 		case <-timeout: // this is the normal case
@@ -167,7 +170,7 @@ func waitForPossibleICMP(test *Test, icmpCh chan ICMPMessage) bool {
 }
 
 // TODO(bf) IPv6. Enough said.
-func matchICMP(test *Test, msg ICMPMessage) (bool, error) {
+func matchICMP(test *SubTest, msg ICMPMessage) (bool, error) {
 	debug.Printf("Matching message %v to a test", msg)
 	if test.laddr_used == msg.originalLAddr && test.raddr_used == msg.originalRAddr {
 		debug.Printf("Proto %s vs %s", strings.ToLower(msg.originalProto),test.net[:len(msg.originalProto)])

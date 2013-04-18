@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"strconv"
 	"github.com/droundy/goopt"
-	//	"io"
 	"encoding/csv"
 	"log"
 	"net"
@@ -32,12 +31,16 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"container/list"
 )
 
 type Parameters struct {
+	Debug      *bool
 	TestsFile  *string
+	OutputFile *string
 	MyHost     *string
 	MaxStreams *int
+	Timeout     *string
 }
 
 var params Parameters
@@ -47,25 +50,50 @@ type semaphore chan empty
 
 var semStreams semaphore
 
+
+
+// Need to store the original test details so we can write them out again.
+// Expanded tests (one per port) are children of this, so we can iterate over them
+
 type Test struct {
+	hostname   string
 	ref        string
 	desc       string
+	laddr      string
+    ldesc      string
+    rhost      string
+	raddr      string
+	rdesc      string
 	net        string
+	ipv6       bool   // test with underlying AF_INET6 socket
+	attempt    bool  // should this test be attempted. e.g. does the hostname match?
+	run        bool
+	passed     bool
+	error      string
+	subTests list.List // There is always at least one
+}
+
+// All subtests must be of the same kind as the parent, but the source and dest addresses/ports can be different.
+type SubTest struct {
+	subref     string
 	laddr      string
 	raddr      string
+	net        string
 	ipv6       bool   // test with underlying AF_INET6 socket
 	laddr_used string // the local address that ended up being used for this test
 	raddr_used string // the remote address we connected to for this test
 	run        bool
 	passed     bool
-	error      string
+	refused    bool
+	error      string	
 }
 
-var TestsToRun []Test
+var ValidTests uint
+var TestsInFile []Test
 
 var gotRoot bool
 
-const debug debugging = true // or flip to false
+var debug debugging = !true // or flip to false
 
 type debugging bool
 
@@ -82,17 +110,20 @@ func (d debugging) Printf(format string, args ...interface{}) {
 
 func init() {
 	goopt.Description = func() string {
-		return "conchk v" + goopt.Version + " - (c)2013 Bruce Fitzsimons"
+		return "conchk v" + goopt.Version
 	}
 	goopt.Author = "Bruce Fitzsimons <bruce@fitzsimons.org>"
-	goopt.Version = "0.2"
-	goopt.Summary = "conchk is an IP connectivity test tool. See github.com/Bwooce/conchk for more information."
+	goopt.Version = "0.3"
+	goopt.Summary = "conchk is an IP connectivity test tool - (c)2013 Bruce Fitzsimons.\n See github.com/Bwooce/conchk for more information. "
 
 	Hostname, _ := os.Hostname()
 
+	params.Debug = goopt.Flag([]string{"-d", "--debug"} , []string{},"additional debugging output", "")
 	params.TestsFile = goopt.String([]string{"-T", "--tests"}, "./tests.conchk", "test file to load")
+	params.OutputFile = goopt.String([]string{"-O", "--outputcsv"}, "", "name of results .csv file to write to")
 	params.MyHost = goopt.String([]string{"-H", "--host"}, Hostname, "Hostname to use for config lookup")
 	params.MaxStreams = goopt.Int([]string{"--maxstreams"}, 8, "Maximum simultaneous checks")
+	params.Timeout = goopt.String([]string{"--timeout"}, "10s", "TCP connectivity timeout")
 
 	semStreams = make(semaphore, *params.MaxStreams)
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -100,15 +131,16 @@ func init() {
 }
 
 func main() {
-	log.Println("-------------", goopt.Description(), "------------")
+	log.Println("-------------", "conchk v"+goopt.Version, "------------")
 	gotRoot = true
 	if os.Getuid() != 0 {
 		gotRoot = false
-		log.Println("WARNING: conchk must run as root to fully function (ICMP listens, low port access etc)")
+		log.Println("WARNING: conchk must run as root for full functionality (ICMP listens, low port access etc)")
 	}
 
 	// get command line options
 	goopt.Parse(nil)
+	debug = debugging(*params.Debug)
 
 	/*	if !validateOptions() {
 		log.Fatal("Incompatible options")
@@ -124,42 +156,34 @@ func main() {
 	}
 
 	// loop over each connection, in a new thread
-	for idx, _ := range TestsToRun {
+	for idx, _ := range TestsInFile {
 		/*if tt.ipv6 && !net.supportsIPv6 {
 					log.Println("IPv6 not supported")
 		            continue
 		        }*/
-		semStreams.acquire(1) // or block until one slot is free
-		//fmt.Println("Going to run a goroutine")
-		go runTest(&TestsToRun[idx], p)
+		if TestsInFile[idx].attempt {
+				semStreams.acquire(1) // or block until one slot is free
+			//fmt.Println("Going to run a goroutine")
+			go runTest(&TestsInFile[idx], p)
+		}
 	}
-
-	var msg ICMPMessage
-	inputChan <- msg
-
-	/// try basic check
-	/// if that works, try helper app
-	/// log success/failures - stderr? syslog? webpage?
-	// wait for all to complete
-	// end
 
 	debug.Println("going to wait for all goroutines to complete")
 	semStreams.acquire(*params.MaxStreams) // don't exit until all goroutines are complete
 	debug.Println("all complete")
 
 	log.Println("--------------------- TESTING RUN COMPLETED ---------------------")
-	numTests := len(TestsToRun)
-	var numPassed int
-	for _, test := range TestsToRun {
+	var numPassed uint
+	for _, test := range TestsInFile {
 		log.Println(fmtTest(test))
-		if test.passed {
+		if test.attempt && test.passed {
 			numPassed++
 		}
 	}
-	log.Printf("== %d of %d tests passed ==", numPassed, numTests)
+	log.Printf("== %d of %d tests passed ==", numPassed, ValidTests)
 	log.Println("-------------", goopt.Description(), "-------------")
 
-	if numPassed != numTests {
+	if numPassed != ValidTests {
 		os.Exit(1) // indicate an error
 	}
 	os.Exit(0)
@@ -173,21 +197,21 @@ func getTestsFromFile() {
 			log.Fatal("Cannot open", *params.TestsFile, "due to error", err)
 		}
 		cr := csv.NewReader(file)
+		cr.Comment='#'
+		
 		tests, err := cr.ReadAll()
 		if err != nil {
 			log.Fatal("Cannot read tests from", *params.TestsFile, "due to error", err)
 		}
 		//fmt.Println("looking for tests for", *params.MyHost)
 		for _, test := range tests {
-			if strings.TrimSpace(test[0]) == *params.MyHost {
-				appendTest(test)
-			}
+			appendTest(test)
 		}
 		
 		// See if we can continue or not. Try hard.
 		if !gotRoot {
-			for _, test := range TestsToRun  {
-				if len(test.laddr) > 0 {
+			for _, test := range TestsInFile  {
+				if test.attempt && len(test.laddr) > 0 {
 					_, aport, err := net.SplitHostPort(test.laddr)
 					port, err2 := strconv.ParseUint(aport, 0, 32)
 					if err != nil || err2 != nil {
@@ -205,44 +229,66 @@ func getTestsFromFile() {
 }
 
 func appendTest(test []string) {
-	address, startPort, endPort := findDestRange(strings.TrimSpace(test[5]))
-	portCount := (endPort-startPort)+1
 
-	l := len(TestsToRun)
-	if l+portCount >= cap(TestsToRun) { // reallocate
-		// Allocate double what's needed, for future growth.
-		newSlice := make([]Test, (l+portCount)*2)
-		// The copy function is predeclared and works for any slice type.
-		copy(newSlice, TestsToRun)
-		TestsToRun = newSlice
+	var newTest Test
+	
+	newTest.hostname = strings.TrimSpace(test[0])
+	if newTest.hostname == *params.MyHost {
+		newTest.attempt = true
+		ValidTests++
 	}
+	newTest.ref = strings.TrimSpace(test[1])
+	newTest.desc = strings.TrimSpace(test[2])
+	laddr := strings.TrimSpace(test[3])
+	if len(laddr) > 0 {
+		i := strings.LastIndex(test[3], ":")
+		if i < 0 { // no colon
+			laddr += ":0"
+		}
+	}
+	newTest.laddr = laddr
+	newTest.ldesc = strings.TrimSpace(test[4])
+	newTest.rhost = strings.TrimSpace(test[5])
+	newTest.raddr = strings.TrimSpace(test[6])
+	newTest.ldesc = strings.TrimSpace(test[7])
+	newTest.net = strings.TrimSpace(test[8])
+
+	address, startPort, endPort := findDestRange(newTest.raddr)
 	debug.Printf("iterating from %d to %d", startPort, endPort+1)
+
 	for cnt:=0; cnt < (endPort-startPort)+1; cnt++ {
 		debug.Printf("Adding test for dest port %d", startPort+cnt)
-		TestsToRun = TestsToRun[0 : l+1]
-		TestsToRun[l].ref = strings.TrimSpace(test[1])
-		if(startPort!=endPort && startPort !=0) {
-			TestsToRun[l].ref += fmt.Sprintf(".%d", cnt+1)
+		var newSubTest SubTest
+		
+		if startPort!=endPort && startPort !=0  {
+			newSubTest.subref = fmt.Sprintf("%s.%d", newTest.ref, cnt+1)
 		}
-		TestsToRun[l].desc = strings.TrimSpace(test[2])
-		TestsToRun[l].net = strings.TrimSpace(test[3])
 
-		laddr := strings.TrimSpace(test[4])
-		if len(laddr) > 0 {
-			i := strings.LastIndex(test[4], ":")
-			if i < 0 { // no colon
-				laddr += ":0"
-		}
-		}
-		TestsToRun[l].laddr = laddr
+		// these three are not currently mutable per subTest, but are convenient to have here
+		newSubTest.net = newTest.net
+		newSubTest.ipv6 = newTest.ipv6
+		newSubTest.laddr = newTest.laddr
+
 		if startPort == 0 {
-			TestsToRun[l].raddr = address
+			newSubTest.raddr = address
 		} else {
-			TestsToRun[l].raddr = fmt.Sprintf("%s:%d",address,startPort+cnt)
+			newSubTest.raddr = fmt.Sprintf("%s:%d",address,startPort+cnt)
 		}
-		l++
+		
+		newTest.subTests.PushBack(&newSubTest)
 	}
-	debug.Println("size is", len(TestsToRun), "capacity is", cap(TestsToRun))
+
+	l := len(TestsInFile)
+	if l+1 > cap(TestsInFile) { // reallocate
+		// Allocate double what's needed, for future growth.
+		newSlice := make([]Test, l+1, (l+1)*2)
+		// The copy function is predeclared and works for any slice type.
+		copy(newSlice, TestsInFile)
+		TestsInFile = newSlice
+	}
+	TestsInFile = TestsInFile[0:l+1]
+	TestsInFile[l] = newTest
+	debug.Printf("TestsInFile l=%d, len is %d, cap is %d", l, len(TestsInFile), cap(TestsInFile))
 }
 
 // Find the range of ports on the destination, if any. Returns 0,0 for error which should work fine (will error out on non-IP or ICMP protos)
@@ -288,6 +334,10 @@ func runTest(test *Test, p *ICMPPublisher) {
 
 	debug.Println("Running test", fmtTest(*test))
 
+	test.run = true
+	allPassed := true
+	var errorText string
+
 	i := strings.LastIndex(test.net, ":")
 	var afnet string
 	if i < 0 { // no colon
@@ -296,21 +346,40 @@ func runTest(test *Test, p *ICMPPublisher) {
 		afnet = test.net[:i]
 	}
 	debug.Println("Got type of", afnet)
-	switch afnet {
-	//case "ip", "ip4", "ip6":
-	case "udp", "udp4", "udp6":
-		runUDPTest(afnet, test, p)
-	case "tcp", "tcp4", "tcp6":
-		runTCPTest(afnet, test, p)
-	default:
-		// Do ICMP tests since Dial doesn't support them
-		test.run = true
-		test.error = "Protocol" + afnet + " not yet implemented"
+	for subTestV := test.subTests.Front(); subTestV != nil; subTestV = subTestV.Next() {
+		subTest := subTestV.Value.(*SubTest)
+		switch afnet {
+			//case "ip", "ip4", "ip6":
+		case "udp", "udp4", "udp6":
+			runUDPTest(afnet, subTest, p)
+		case "tcp", "tcp4", "tcp6":
+				runTCPTest(afnet, subTest, p)
+		default:
+			// Do ICMP tests since Dial doesn't support them
+			allPassed = false
+			errorText = "Protocol" + afnet + " not yet implemented"
+		}
 	}
+
+	for subTestV := test.subTests.Front(); subTestV != nil; subTestV = subTestV.Next() {
+		subTest := subTestV.Value.(*SubTest)
+		if !subTest.passed && !subTest.refused {
+			debug.Printf("subTest %+v", *subTest)
+			errorText += fmt.Sprintf("%s %s", subTest.subref, subTest.error)
+			if allPassed {
+				allPassed = false
+			} else {
+				errorText += ";"
+			}
+		}
+	}
+	test.passed = allPassed
+	test.error = errorText
+
 	return
 }
 
-func runUDPTest(afnet string, test *Test, p *ICMPPublisher) {
+func runUDPTest(afnet string, test *SubTest, p *ICMPPublisher) {
 	debug.Println("Doing UDP test")
 
 	var icmpCh chan ICMPMessage
@@ -352,10 +421,10 @@ func runUDPTest(afnet string, test *Test, p *ICMPPublisher) {
 		test.run = true
 		test.passed = true
 	}
-	debug.Println("*****Completed: ", fmtTest(*test))
+	debug.Println("*****Completed: ", fmtSubTest(*test))
 }
 
-func runTCPTest(afnet string, test *Test, p *ICMPPublisher) {
+func runTCPTest(afnet string, test *SubTest, p *ICMPPublisher) {
 	debug.Println("Doing TCP test")
 	var d net.Dialer
 	var err error
@@ -368,9 +437,21 @@ func runTCPTest(afnet string, test *Test, p *ICMPPublisher) {
 		test.error = "TCP Resolve error: " + err.Error()
 		return
 	}
-	d.Timeout, err = time.ParseDuration("20s")
-	conn, err := d.Dial(test.net, test.raddr)
+	d.Timeout, err = time.ParseDuration(*params.Timeout)
 	if err != nil {
+		test.run = true
+		test.error = "Invalid timeout value specified: " + err.Error()
+		return
+	}		
+	conn, err := d.Dial(test.net, test.raddr)
+	if nerr, ok := err.(*net.OpError); ok && nerr.Err.Error() == "connection refused" {
+		test.run = true
+		test.refused = true
+		debug.Printf("Got TCP conn refused %v....%+v", nerr, *nerr) 
+		return
+	} 
+	if err != nil {
+		debug.Printf("Error was type %T, %+v", err, err)
 		test.run = true
 		test.error = "Connect error: " + err.Error()
 		return
@@ -386,7 +467,7 @@ func runTCPTest(afnet string, test *Test, p *ICMPPublisher) {
 	conn.Close()
 	test.run = true
 	test.passed = true
-	debug.Println(fmtTest(*test))
+	debug.Println(fmtSubTest(*test))
 }
 
 // acquire n resources
@@ -411,21 +492,10 @@ func fmtTest(test Test) string {
 	} else {
 		local = test.laddr
 	}
-	if test.laddr_used != "" {
-		local += "(" + test.laddr_used + ")"
-	}
-	remote := test.raddr
-	if test.raddr_used != "" {
-		remote += "(" + test.raddr_used + ")"
-	}
-	status := "PENDING"
-	if test.run {
-		status = "FAILED"
-		if test.passed {
-			status = "PASSED"
-		}
-	}
-	out := fmt.Sprintf("%s: %s '%s' %s %s --> %s", status, pad(test.ref,5), pad(test.desc,60), test.net, local, remote)
+
+	status := testResult(test)
+
+	out := fmt.Sprintf("%s: %s '%s' %s %s --> %s", status, pad(test.ref,5), pad(test.desc,60), test.net, local, test.raddr)
 	if test.ipv6 {
 		out += " [on AF_INET6 socket]"
 	}
@@ -434,6 +504,64 @@ func fmtTest(test Test) string {
 	}
 	return out
 }
+
+func fmtSubTest(test SubTest) string {
+
+	// only print the addresses actually used, since the parent Test will print the requested values
+	status := subTestResult(test)
+
+	out := fmt.Sprintf("%s %s --> %s %s", pad(test.subref,6), test.laddr_used, test.raddr_used, status)
+	if len(test.error) > 0 {
+		out += " ERROR INFO: " + test.error
+	}
+	return out
+}
+
+
+func testResult(test Test) string {
+	status := "PENDING"
+	if test.run {
+		status = "FAILED"
+		if test.passed {
+			status = "PASSED"
+		}
+	}
+	return status
+}
+
+func subTestResult(test SubTest) string {
+	status := "PENDING"
+	if test.run {
+		status = "FAILED"
+		if test.passed {
+			status = "PASSED"
+		}
+	}
+	return status
+}
+
+func fmtTestCSV(test Test) []string {
+	const fields int = 10
+
+	out := make([]string,fields)
+
+	out = out[0 : fields]
+	out[0] = test.hostname
+	out[1] = test.ref
+	out[2] = test.desc
+	out[3] = test.laddr
+	out[4] = test.ldesc
+	out[5] = test.rhost
+	out[6] = test.raddr
+	out[7] = test.rdesc
+	out[8] = test.net
+	out[9] = testResult(test)
+	out[10] = test.error
+
+	debug.Printf("CSV line is %v", out)
+	return out
+}
+
 
 func pad(s string, length int) string {
 	if(len(s) < length) {
