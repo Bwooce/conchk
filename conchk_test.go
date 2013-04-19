@@ -52,26 +52,25 @@ func TestIsV6(t *testing.T) {
 }
 
 func TestFindDestRange(t *testing.T) {
-	var tests = []struct { 
+	var tests = []struct {
 		AddressPort string
-		Address string
-		StartPort int
-		EndPort int
-	}{ 
-		{"10.10.10.10:10","10.10.10.10", 10,10}, 
-		{"10.10.10.10:10-20","10.10.10.10",10,20},
-		{"10.10.10.10:-10","10.10.10.10:-10",0,0}, // should fail
-		{"10.10.10.11","10.10.10.11",0,0},
-		{"10.10.10.10:","10.10.10.10:",0,0},
-		{"[::ffff:192.0.2.47]:1-1000","[::ffff:192.0.2.47]",1,1000},
-		{"[::ffff:192.0.2.47]:","[::ffff:192.0.2.47]:",0,0},
-		{"[::ffff:192.0.2.46]:1000-1","[::ffff:192.0.2.46]:1000-1", 0,0},
-		
-}
+		Address     string
+		StartPort   int
+		EndPort     int
+	}{
+		{"10.10.10.10:10", "10.10.10.10", 10, 10},
+		{"10.10.10.10:10-20", "10.10.10.10", 10, 20},
+		{"10.10.10.10:-10", "10.10.10.10:-10", 0, 0}, // should fail
+		{"10.10.10.11", "10.10.10.11", 0, 0},
+		{"10.10.10.10:", "10.10.10.10:", 0, 0},
+		{"[::ffff:192.0.2.47]:1-1000", "[::ffff:192.0.2.47]", 1, 1000},
+		{"[::ffff:192.0.2.47]:", "[::ffff:192.0.2.47]:", 0, 0},
+		{"[::ffff:192.0.2.46]:1000-1", "[::ffff:192.0.2.46]:1000-1", 0, 0},
+	}
 	for count, test := range tests {
 		ip, start, end := findDestRange(test.AddressPort)
-		if ip !=test.Address || start != test.StartPort || end != test.EndPort {
+		if ip != test.Address || start != test.StartPort || end != test.EndPort {
 			t.Fatalf("Line %d Failure to correctly parse the port ranges from %s!=%s %d!=%d or %d!=%d", count+1, test.Address, ip, test.StartPort, start, test.EndPort, end)
 		}
-	} 
+	}
 }

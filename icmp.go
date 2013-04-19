@@ -21,21 +21,21 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
-	"time"
-	"errors"
 	"strings"
+	"time"
 )
 
 type ICMPMessage struct {
-	msgtype        int8
-	code           int8
-	desc           string
-	originalRAddr   string
+	msgtype       int8
+	code          int8
+	desc          string
+	originalRAddr string
 	originalLAddr string
-	originalProto  string
+	originalProto string
 }
 
 type ICMPPublisher struct {
@@ -63,45 +63,45 @@ const (
 
 // ICMP4_PARAMETER_PROBLEM
 var ICMP4ParameterProblemCodes map[int8]string = map[int8]string{
-	0:"Pointer indicates the error", // TODO(bf) this needs some more work to decode the pointer
-		1:"Missing a required option",
-		2:"Bad length",
+	0: "Pointer indicates the error", // TODO(bf) this needs some more work to decode the pointer
+	1: "Missing a required option",
+	2: "Bad length",
 }
 
 // ICMP4_TIME_EXCEEDED codes
 var ICMP4TimeExceededCodes map[int8]string = map[int8]string{
-		0:"Time-to-live exceeded in transit",
-		1:"Fragment reassembly time exceeded",
+	0: "Time-to-live exceeded in transit",
+	1: "Fragment reassembly time exceeded",
 }
 
 // ICMP4_DEST_UNREACHABLE codes
 var ICMP4UnreachableCodes map[int8]string = map[int8]string{
-	0:"Network unreachable error",
-	1:"Host unreachable error",
-	2:"Protocol unreachable error (the designated transport protocol is not supported)",
-	3:"Port unreachable error (the designated protocol is unable to inform the host of the incoming message)",
-	4:"The datagram is too big. Packet fragmentation is required but the 'don't fragment' (DF) flag is on.",
-	5:"Source route failed error",
-	6:"Destination network unknown error",
-	7:"Destination host unknown error",
-	8:"Source host isolated error",
-	9:"The destination network is administratively prohibited",
-	10:"The destination host is administratively prohibited",
-	11:"The network is unreachable for Type Of Service",
-	12:"The host is unreachable for Type Of Service",
-	13:"Communication administratively prohibited (administrative filtering prevents packet from being forwarded)",
-	14:"Host precedence violation (indicates the requested precedence is not permitted for the combination of host or network and port)",
-	15:"Precedence cutoff in effect (precedence of datagram is below the level set by the network administrators)",
+	0:  "Network unreachable error",
+	1:  "Host unreachable error",
+	2:  "Protocol unreachable error (the designated transport protocol is not supported)",
+	3:  "Port unreachable error (the designated protocol is unable to inform the host of the incoming message)",
+	4:  "The datagram is too big. Packet fragmentation is required but the 'don't fragment' (DF) flag is on.",
+	5:  "Source route failed error",
+	6:  "Destination network unknown error",
+	7:  "Destination host unknown error",
+	8:  "Source host isolated error",
+	9:  "The destination network is administratively prohibited",
+	10: "The destination host is administratively prohibited",
+	11: "The network is unreachable for Type Of Service",
+	12: "The host is unreachable for Type Of Service",
+	13: "Communication administratively prohibited (administrative filtering prevents packet from being forwarded)",
+	14: "Host precedence violation (indicates the requested precedence is not permitted for the combination of host or network and port)",
+	15: "Precedence cutoff in effect (precedence of datagram is below the level set by the network administrators)",
 }
 
 var IPProtocol map[uint8]string = map[uint8]string{
-	1:"ICMP",
-	2:"IGMP",
-	6:"TCP",
-	17:"UDP",
-	41:"ENCAP",
-	89:"OSPF",
-	132:"SCTP",
+	1:   "ICMP",
+	2:   "IGMP",
+	6:   "TCP",
+	17:  "UDP",
+	41:  "ENCAP",
+	89:  "OSPF",
+	132: "SCTP",
 }
 
 func NewICMPPublisher() (*ICMPPublisher, chan ICMPMessage) {
@@ -161,14 +161,14 @@ func waitForPossibleICMP(test *SubTest, icmpCh chan ICMPMessage) bool {
 				test.refused = false
 				if msg.msgtype == ICMP4_DEST_UNREACHABLE || msg.msgtype == ICMP6_DEST_UNREACHABLE {
 					test.refused = true
-				} 
+				}
 				test.error = err.Error()
 				debug.Println(fmtSubTest(*test), "ICMP", err)
 				return true
 			}
 		case <-timeout: // this is the normal case
 			debug.Println("Timeout - exiting loop")
-			return false;
+			return false
 		}
 	}
 	return false
@@ -178,7 +178,7 @@ func waitForPossibleICMP(test *SubTest, icmpCh chan ICMPMessage) bool {
 func matchICMP(test *SubTest, msg ICMPMessage) (bool, error) {
 	debug.Printf("Matching message %v to a test", msg)
 	if test.laddr_used == msg.originalLAddr && test.raddr_used == msg.originalRAddr {
-		debug.Printf("Proto %s vs %s", strings.ToLower(msg.originalProto),test.net[:len(msg.originalProto)])
+		debug.Printf("Proto %s vs %s", strings.ToLower(msg.originalProto), test.net[:len(msg.originalProto)])
 		if strings.ToLower(msg.originalProto) == test.net[:len(msg.originalProto)] {
 			debug.Println("#################MATCH#############")
 			return true, errors.New(msg.desc)
@@ -201,29 +201,29 @@ func icmpListen(v6 bool, ch chan ICMPMessage) {
 
 	c, err := net.ListenPacket(afnet, "")
 	if err != nil {
-    	debug.Println("ListenPacket failed: %v", err)
-    	return
+		debug.Println("ListenPacket failed: %v", err)
+		return
 	}
 	defer c.Close()
 
 	rawICMP := make([]byte, 256)
-    for {
-    	_, fromAddr, err := c.ReadFrom(rawICMP)
-    	if err != nil {
-    		log.Fatal("ReadFrom failed: %v", err)
-    		return
-    	}
+	for {
+		_, fromAddr, err := c.ReadFrom(rawICMP)
+		if err != nil {
+			log.Fatal("ReadFrom failed: %v", err)
+			return
+		}
 		msg, err := parseICMP(v6, fromAddr, rawICMP)
 		if err != nil {
-    		log.Printf("parseICMP failed: %v", err)
+			log.Printf("parseICMP failed: %v", err)
 			continue
-    	}
+		}
 		ch <- msg
-    }
+	}
 }
 
 func parseICMP(v6 bool, fromAddr net.Addr, rawICMP []byte) (ICMPMessage, error) {
-	//debug.Printf("Got message from %v : %v", fromAddr, rawICMP) 
+	//debug.Printf("Got message from %v : %v", fromAddr, rawICMP)
 	if !v6 {
 		switch rawICMP[0] {
 		case ICMP4_ECHO_REQUEST:
@@ -234,11 +234,11 @@ func parseICMP(v6 bool, fromAddr net.Addr, rawICMP []byte) (ICMPMessage, error) 
 			return ICMPMessage{int8(rawICMP[0]), int8(rawICMP[1]), fmt.Sprintf("ID %d Sequence %d", id, seq), "odest", "osrc", "oproto"}, nil
 		case ICMP4_DEST_UNREACHABLE:
 			debug.Printf("V4Dest Unreachable from %v", fromAddr)
-			s,d,p := parsev4(rawICMP[8:])
+			s, d, p := parsev4(rawICMP[8:])
 			return ICMPMessage{int8(rawICMP[0]), int8(rawICMP[1]), ICMP4UnreachableCodes[int8(rawICMP[1])], d, s, p}, nil
 		case ICMP4_TIME_EXCEEDED:
 			debug.Printf("V4Time Exceeded from %v", fromAddr)
-			s,d,p := parsev4(rawICMP[8:])
+			s, d, p := parsev4(rawICMP[8:])
 			return ICMPMessage{int8(rawICMP[0]), int8(rawICMP[1]), ICMP4TimeExceededCodes[int8(rawICMP[1])], d, s, p}, nil
 		case ICMP4_PARAMETER_PROBLEM:
 			debug.Printf("V4Parameter Problem from %v", fromAddr)
@@ -250,15 +250,14 @@ func parseICMP(v6 bool, fromAddr net.Addr, rawICMP []byte) (ICMPMessage, error) 
 	return ICMPMessage{}, errors.New("Unparsable ICMP message")
 }
 
-
 func parsev4(b []byte) (originalLAddr, originalRAddr, originalProto string) {
 	hdrlen := (int(b[0]) & 0x0f) << 2
 	originalProto = IPProtocol[uint8(b[9])]
 	originalLIP := net.IPv4(b[12], b[13], b[14], b[15]).String()
 	originalRIP := net.IPv4(b[16], b[17], b[18], b[19]).String()
-	originalLPort := fmt.Sprintf("%d",int(b[hdrlen])<<8 | int(b[hdrlen+1])) // true for TCP/UDP/SCTP
-	originalRPort := fmt.Sprintf("%d",int(b[hdrlen+2])<<8 | int(b[hdrlen+3])) // true for TCP/UDP/SCTP
-	originalLAddr = net.JoinHostPort(originalLIP,originalLPort)
-	originalRAddr = net.JoinHostPort(originalRIP,originalRPort)
+	originalLPort := fmt.Sprintf("%d", int(b[hdrlen])<<8|int(b[hdrlen+1]))   // true for TCP/UDP/SCTP
+	originalRPort := fmt.Sprintf("%d", int(b[hdrlen+2])<<8|int(b[hdrlen+3])) // true for TCP/UDP/SCTP
+	originalLAddr = net.JoinHostPort(originalLIP, originalLPort)
+	originalRAddr = net.JoinHostPort(originalRIP, originalRPort)
 	return
 }
