@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 	"container/list"
+	"bytes"
 )
 
 type Parameters struct {
@@ -50,15 +51,13 @@ type semaphore chan empty
 
 var semStreams semaphore
 
-
-
 // Need to store the original test details so we can write them out again.
 // Expanded tests (one per port) are children of this, so we can iterate over them
 
 type Test struct {
-	hostname   string
 	ref        string
 	desc       string
+	lhost      string
 	laddr      string
     ldesc      string
     rhost      string
@@ -114,16 +113,30 @@ func init() {
 	}
 	goopt.Author = "Bruce Fitzsimons <bruce@fitzsimons.org>"
 	goopt.Version = "0.3"
-	goopt.Summary = "conchk is an IP connectivity test tool - (c)2013 Bruce Fitzsimons.\n See github.com/Bwooce/conchk for more information. "
+	goopt.Summary = "(c)2013 Bruce Fitzsimons.\n\nconchk is an IP connectivity test tool designed to validate that all configured IP connectivity actually works\n "
+	goopt.Summary += "It reads a list of tests and executes them, in a parallel manner, based on the contents of each line"
+	goopt.Summary += "conchk supports tcp and udp based tests (IPv4 and IPv6), at this time.\n\n"
+	goopt.Summary += "==Notes==\n"
+	goopt.Summary += "* testing a range of supports is supported. In this case the rules for a successful test are somewhat different\n"
+	goopt.Summary += "** If one of the ports gets a successful connect, and the rest are refused (connection refused) as nothing is listening\n"
+	goopt.Summary += "\tthen this is considered to be a successful test of the range. This is the most common scenario in our experience;\n"
+	goopt.Summary += "\tthe firewalls and routing are demonstrably working, and at least one destination service is ok. If you need all ports to work\n"
+	goopt.Summary += "\tthen consider using individual tests\n" 
+	goopt.Summary += "* If all tests for this host pass, then conchk will exit(0). Otherwise it will exit(1)\n"
+	goopt.Summary += "* conchk will use the current hostname, or the commandline parameter, to find the tests approprate to execute.\n"
+	goopt.Summary += "\tThis means all the tests for a system, or project can be placed in one file\n"
+	goopt.Summary += "* The .csv output option will write a file much like the input file, but with two additional columns and without any comments\n"
+	goopt.Summary += "\t This file can be fed back into conchk without error.\n\n"
+	goopt.Summary += "See github.com/Bwooce/conchk for more information.\n\n"
 
 	Hostname, _ := os.Hostname()
 
 	params.Debug = goopt.Flag([]string{"-d", "--debug"} , []string{},"additional debugging output", "")
 	params.TestsFile = goopt.String([]string{"-T", "--tests"}, "./tests.conchk", "test file to load")
-	params.OutputFile = goopt.String([]string{"-O", "--outputcsv"}, "", "name of results .csv file to write to")
+	params.OutputFile = goopt.String([]string{"-O", "--outputcsv"}, "", "name of results .csv file to write to. A pre-existing file will be overwritten.")
 	params.MyHost = goopt.String([]string{"-H", "--host"}, Hostname, "Hostname to use for config lookup")
 	params.MaxStreams = goopt.Int([]string{"--maxstreams"}, 8, "Maximum simultaneous checks")
-	params.Timeout = goopt.String([]string{"--timeout"}, "10s", "TCP connectivity timeout")
+	params.Timeout = goopt.String([]string{"--timeout"}, "5s", "TCP connectivity timeout, UDP delay for ICMP responses")
 
 	semStreams = make(semaphore, *params.MaxStreams)
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -131,7 +144,7 @@ func init() {
 }
 
 func main() {
-	log.Println("-------------", "conchk v"+goopt.Version, "------------")
+	log.Println("--------------------------", "conchk v"+goopt.Version, "--------------------------")
 	gotRoot = true
 	if os.Getuid() != 0 {
 		gotRoot = false
@@ -175,13 +188,34 @@ func main() {
 	log.Println("--------------------- TESTING RUN COMPLETED ---------------------")
 	var numPassed uint
 	for _, test := range TestsInFile {
-		log.Println(fmtTest(test))
-		if test.attempt && test.passed {
-			numPassed++
+		if test.attempt {
+			log.Println(fmtTest(test))
+			if test.passed {
+				numPassed++
+			}
 		}
 	}
 	log.Printf("== %d of %d tests passed ==", numPassed, ValidTests)
-	log.Println("-------------", goopt.Description(), "-------------")
+	log.Println("--------------------------", goopt.Description(), "--------------------------")
+
+	if *params.OutputFile != "" {
+		const hdr = "#format is: TestRef,TestDescription,Hostname,LocalIP:Port,LocalDescription[u],RemoteHost[u],RemoteIP:Port,RemoteDescription[u],Protocol(tcp,udp,tcp4 etc),Result[o],Summary[o]\n# [u] fields are currently unused, [o] are optional\n"
+		buf := bytes.NewBufferString(hdr)
+		fd, err := os.OpenFile(*params.OutputFile, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0655)
+		if err == nil {
+			defer fd.Close()
+			fd.Write(buf.Bytes())
+			w := csv.NewWriter(fd)
+			for _, test := range TestsInFile {
+				l := fmtTestCSV(test)
+				w.Write(l)
+			}
+			w.Flush()
+		} else {
+			log.Printf("Cannot open file %s due to error %s: skipping and exiting with error", *params.OutputFile, err)
+			os.Exit(1)	
+		}
+	}
 
 	if numPassed != ValidTests {
 		os.Exit(1) // indicate an error
@@ -232,13 +266,13 @@ func appendTest(test []string) {
 
 	var newTest Test
 	
-	newTest.hostname = strings.TrimSpace(test[0])
-	if newTest.hostname == *params.MyHost {
+	newTest.lhost = strings.TrimSpace(test[2])
+	if newTest.lhost == *params.MyHost {
 		newTest.attempt = true
 		ValidTests++
 	}
-	newTest.ref = strings.TrimSpace(test[1])
-	newTest.desc = strings.TrimSpace(test[2])
+	newTest.ref = strings.TrimSpace(test[0])
+	newTest.desc = strings.TrimSpace(test[1])
 	laddr := strings.TrimSpace(test[3])
 	if len(laddr) > 0 {
 		i := strings.LastIndex(test[3], ":")
@@ -361,17 +395,35 @@ func runTest(test *Test, p *ICMPPublisher) {
 		}
 	}
 
+	// Rules for test passing.
+	// If there is only one test, then it must connect. 
+	// If there is a range, then 1->all of them must connect, but some are allowed to be refused
+	// If there is a range and any fail for another reason, then the test fails.
+	listLen := test.subTests.Len()
+	onePass := false
 	for subTestV := test.subTests.Front(); subTestV != nil; subTestV = subTestV.Next() {
 		subTest := subTestV.Value.(*SubTest)
-		if !subTest.passed && !subTest.refused {
+		// record if one test passed
+		if subTest.passed && !onePass {
+			onePass = true
+		}
+		if !subTest.passed && listLen == 1 {
+			allPassed = false
+			errorText = subTest.error
+		}
+
+		if listLen > 1 && !subTest.passed && !subTest.refused {
 			debug.Printf("subTest %+v", *subTest)
-			errorText += fmt.Sprintf("%s %s", subTest.subref, subTest.error)
+			errorText += fmt.Sprintf("%s %s;", subTest.subref, subTest.error)
 			if allPassed {
 				allPassed = false
-			} else {
-				errorText += ";"
 			}
 		}
+	}
+
+	// Cater for the case where all ports were refused
+	if allPassed && !onePass {
+		allPassed = false
 	}
 	test.passed = allPassed
 	test.error = errorText
@@ -541,14 +593,14 @@ func subTestResult(test SubTest) string {
 }
 
 func fmtTestCSV(test Test) []string {
-	const fields int = 10
+	const fields int = 11
 
 	out := make([]string,fields)
 
 	out = out[0 : fields]
-	out[0] = test.hostname
-	out[1] = test.ref
-	out[2] = test.desc
+	out[0] = test.ref
+	out[1] = test.desc
+	out[2] = test.lhost
 	out[3] = test.laddr
 	out[4] = test.ldesc
 	out[5] = test.rhost

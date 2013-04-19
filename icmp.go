@@ -156,7 +156,12 @@ func waitForPossibleICMP(test *SubTest, icmpCh chan ICMPMessage) bool {
 			match, err := matchICMP(test, msg)
 			if match {
 				test.run = true
+				// any matching ICMP message is bad and invalidates the test, unless it's unreachable
 				test.passed = false
+				test.refused = false
+				if msg.msgtype == ICMP4_DEST_UNREACHABLE || msg.msgtype == ICMP6_DEST_UNREACHABLE {
+					test.refused = true
+				} 
 				test.error = err.Error()
 				debug.Println(fmtSubTest(*test), "ICMP", err)
 				return true
