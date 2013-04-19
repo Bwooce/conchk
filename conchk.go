@@ -113,7 +113,7 @@ func init() {
 	}
 	goopt.Author = "Bruce Fitzsimons <bruce@fitzsimons.org>"
 	goopt.Version = "0.3"
-	goopt.Summary = "(c)2013 Bruce Fitzsimons.\n\nconchk is an IP connectivity test tool designed to validate that all configured IP connectivity actually works\n "
+	goopt.Summary = "conchk is an IP connectivity test tool designed to validate that all configured IP connectivity actually works\n "
 	goopt.Summary += "It reads a list of tests and executes them, in a parallel manner, based on the contents of each line"
 	goopt.Summary += "conchk supports tcp and udp based tests (IPv4 and IPv6), at this time.\n\n"
 	goopt.Summary += "==Notes==\n"
@@ -127,7 +127,7 @@ func init() {
 	goopt.Summary += "\tThis means all the tests for a system, or project can be placed in one file\n"
 	goopt.Summary += "* The .csv output option will write a file much like the input file, but with two additional columns and without any comments\n"
 	goopt.Summary += "\t This file can be fed back into conchk without error.\n\n"
-	goopt.Summary += "See github.com/Bwooce/conchk for more information.\n\n"
+	goopt.Summary += "See github.com/Bwooce/conchk for more information.\n\n(c)2013 Bruce Fitzsimons.\n\n"
 
 	Hostname, _ := os.Hostname()
 
