@@ -127,7 +127,7 @@ func init() {
 		"\tThis means all the tests for a system, or project can be placed in one file\n" +
 		"* The .csv output option will write a file much like the input file, but with two additional columns and without any comments\n" +
 		"\t This file can be fed back into conchk without error.\n\n" +
-		"See github.com/Bwooce/conchk for more information.\n\n(c)2013 Bruce Fitzsimons.\n\n"
+		"See http://bwooce.github.io/conchk/ for more information.\n\n(c)2013 Bruce Fitzsimons.\n\n"
 
 	Hostname, _ := os.Hostname()
 
