@@ -117,13 +117,14 @@ func init() {
 		"It reads a list of tests and executes them, in a parallel manner, based on the contents of each line" +
 		"conchk supports tcp and udp based tests (IPv4 and IPv6), at this time.\n\n" +
 		"==Notes==\n" +
+		"* The incuded Excel sheet is a useful way to create and maintain the tests\n" +
 		"* testing a range of supports is supported. In this case the rules for a successful test are somewhat different\n" +
 		"** If one of the ports gets a successful connect, and the rest are refused (connection refused) as nothing is listening\n" +
 		"\tthen this is considered to be a successful test of the range. This is the most common scenario in our experience;\n" +
 		"\tthe firewalls and routing are demonstrably working, and at least one destination service is ok. If you need all ports to work\n" +
 		"\tthen consider using individual tests\n" +
 		"* If all tests for this host pass, then conchk will exit(0). Otherwise it will exit(1)\n" +
-		"* conchk will use the current hostname, or the commandline parameter, to find the tests approprate to execute.\n" +
+		"* conchk will use the current hostname, or the commandline parameter, to find the tests approprate to execute - matches on field 3.\n" +
 		"\tThis means all the tests for a system, or project can be placed in one file\n" +
 		"* The .csv output option will write a file much like the input file, but with two additional columns and without any comments\n" +
 		"\t This file can be fed back into conchk without error.\n\n" +
