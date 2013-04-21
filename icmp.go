@@ -196,7 +196,7 @@ func parseICMPEchoReply(b []byte) (id, seqnum int) {
 func icmpListen(v6 bool, ch chan ICMPMessage) {
 	afnet := "ip4:icmp"
 	if v6 {
-		afnet = "ip6:icmp"
+		afnet = "ip6:ipv6-icmp"
 	}
 
 	c, err := net.ListenPacket(afnet, "")
