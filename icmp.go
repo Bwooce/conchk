@@ -171,7 +171,6 @@ func waitForPossibleICMP(test *SubTest, icmpCh chan ICMPMessage) bool {
 			return false
 		}
 	}
-	return false
 }
 
 // TODO(bf) IPv6. Enough said.
@@ -201,7 +200,7 @@ func icmpListen(v6 bool, ch chan ICMPMessage) {
 
 	c, err := net.ListenPacket(afnet, "")
 	if err != nil {
-		debug.Println("ListenPacket failed: %v", err)
+		debug.Printf("ListenPacket failed: %v", err)
 		return
 	}
 	defer c.Close()
@@ -210,12 +209,12 @@ func icmpListen(v6 bool, ch chan ICMPMessage) {
 	for {
 		_, fromAddr, err := c.ReadFrom(rawICMP)
 		if err != nil {
-			log.Fatal("ReadFrom failed: %v", err)
+			debug.Printf("ReadFrom failed: %v", err)
 			return
 		}
 		msg, err := parseICMP(v6, fromAddr, rawICMP)
 		if err != nil {
-			log.Printf("parseICMP failed: %v", err)
+			debug.Printf("parseICMP failed: %v", err)
 			continue
 		}
 		ch <- msg
