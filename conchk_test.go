@@ -22,14 +22,15 @@ package main
 
 import (
 	"testing"
+	"container/list"
 )
 
 var defaultTests = []Test{
-	{"1", "ICMPv4 localhost", "ip4:icmp", "", "127.0.0.1", false, "", "", false, false, ""},
-	{"2", "ICMPv6 localhost", "ip6:icmp", "", "::1", true, "", "", false, false, ""},
-	{"3", "UDP localhost:80", "udp4", "localhost:1025", "127.0.0.1:80", false, "", "", false, false, ""},
-	{"4", "TCP localhost:http", "tcp4", "", "127.0.0.1:80", false, "", "", false, false, ""},
-	{"5", "TCP bad.example.com:http", "tcp4", "", "bad.example.com:http", false, "", "", false, false, ""},
+	{"1", "ICMPv4 localhost", "lhost", "", "lhost_desc", "rhost", "127.0.0.1", "rhost_desc", "ip4:icmp", false, false, false, false, "", list.List{}},
+	{"2", "ICMPv6 localhost", "lhost", "", "lhost_desc", "rhost", "[::1]", "rhost_desc", "ip4:icmp", false, false, false, false, "", list.List{}},
+	{"3", "UDP localhost:80", "lhost", "localhost:1025", "lhost_desc", "rhost", "127.0.0.1:80", "rhost_desc", "udp4", false, false, false, false, "", list.List{}},
+	{"4", "TCP localhost:http", "lhost", "", "lhost_desc", "rhost", "127.0.0.1:80", "rhost_desc", "tcp4", false, false, false, false, "", list.List{}},
+	{"4", "TCP bad.example.com:http", "lhost", "", "lhost_desc", "rhost", "bad.example.com:http", "rhost_desc", "tcp4", false, false, false, false, "", list.List{}},
 }
 
 func TestIsV6(t *testing.T) {
