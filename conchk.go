@@ -451,7 +451,7 @@ func runUDPTest(afnet string, test *SubTest, p *ICMPPublisher) {
 		return
 	}
 
-	d.Timeout, err = time.ParseDuration("20s")
+	d.Timeout, err = time.ParseDuration(*params.Timeout)
 	conn, err := d.Dial(test.net, test.raddr)
 	if err != nil {
 		test.run = true
